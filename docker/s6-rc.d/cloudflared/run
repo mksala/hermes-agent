@@ -1,0 +1,19 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Cloudflare Tunnel service (Railway-only addition). Exposes the
+# dashboard via a Cloudflare-Access-protected hostname without opening
+# any inbound port on Railway.
+#
+# Same gating pattern as ../dashboard: always declared so s6 has a
+# supervised slot; if TUNNEL_TOKEN isn't set the run script exits
+# cleanly and the companion finish script returns 125 (s6's "permanent
+# failure, do not restart" marker), so s6-svstat reports the slot as
+# down. With TUNNEL_TOKEN set, cloudflared is supervised and restarted
+# on crash — an upgrade over the pre-s6 unsupervised background launch.
+
+[ -n "${TUNNEL_TOKEN:-}" ] || exit 0
+
+# cloudflared needs no privileges; drop to hermes like other services.
+# Skip the drop when already non-root.
+[ "$(id -u)" = 0 ] || exec cloudflared tunnel --no-autoupdate run --token "$TUNNEL_TOKEN"
+exec s6-setuidgid hermes cloudflared tunnel --no-autoupdate run --token "$TUNNEL_TOKEN"

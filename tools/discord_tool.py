@@ -625,6 +625,46 @@ def _remove_role(token: str, guild_id: str, user_id: str, role_id: str, **_kwarg
     return json.dumps({"success": True, "message": f"Role {role_id} removed from user {user_id}."})
 
 
+def _rename_channel(token: str, channel_id: str, name: str, **_kwargs: Any) -> str:
+    """Rename a channel."""
+    channel = _discord_request("PATCH", f"/channels/{channel_id}", token, body={"name": name})
+    return json.dumps({"success": True, "channel_id": channel_id, "name": channel.get("name")})
+
+
+def _set_channel_topic(token: str, channel_id: str, topic: str, **_kwargs: Any) -> str:
+    """Set the topic (description shown under the channel name) of a channel."""
+    channel = _discord_request("PATCH", f"/channels/{channel_id}", token, body={"topic": topic})
+    return json.dumps({"success": True, "channel_id": channel_id, "topic": channel.get("topic")})
+
+
+def _edit_guild(
+    token: str, guild_id: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    **_kwargs: Any,
+) -> str:
+    """Edit guild metadata. Supports name and description fields."""
+    body: Dict[str, Any] = {}
+    # Discord requires guild name to be 2-100 chars; treat empty string as
+    # "don't update name" rather than letting Discord reject the whole request.
+    if name is not None and name.strip():
+        body["name"] = name
+    if description is not None:
+        body["description"] = description
+    if not body:
+        return json.dumps({
+            "success": False,
+            "error": "no fields to update; pass name and/or description",
+        })
+    guild = _discord_request("PATCH", f"/guilds/{guild_id}", token, body=body)
+    return json.dumps({
+        "success": True,
+        "guild_id": guild_id,
+        "name": guild.get("name"),
+        "description": guild.get("description"),
+    })
+
+
 # ---------------------------------------------------------------------------
 # Action dispatch + metadata
 # ---------------------------------------------------------------------------
@@ -645,6 +685,9 @@ _ACTIONS = {
     "create_thread": _create_thread,
     "add_role": _add_role,
     "remove_role": _remove_role,
+    "rename_channel": _rename_channel,
+    "set_channel_topic": _set_channel_topic,
+    "edit_guild": _edit_guild,
 }
 
 _CORE_ACTION_NAMES = frozenset({"fetch_messages", "search_members", "create_thread"})
@@ -672,6 +715,9 @@ _ACTION_MANIFEST: List[Tuple[str, str, str]] = [
     ("create_thread", "(channel_id, name)", "create a public thread; optional message_id anchor"),
     ("add_role", "(guild_id, user_id, role_id)", "assign a role"),
     ("remove_role", "(guild_id, user_id, role_id)", "remove a role"),
+    ("rename_channel", "(channel_id, name)", "rename a channel"),
+    ("set_channel_topic", "(channel_id, topic)", "set a channel's topic/description"),
+    ("edit_guild", "(guild_id, name?, description?)", "edit guild name and/or description"),
 ]
 
 # Actions that require the GUILD_MEMBERS privileged intent.
@@ -693,6 +739,9 @@ _REQUIRED_PARAMS: Dict[str, List[str]] = {
     "create_thread": ["channel_id", "name"],
     "add_role": ["guild_id", "user_id", "role_id"],
     "remove_role": ["guild_id", "user_id", "role_id"],
+    "rename_channel": ["channel_id", "name"],
+    "set_channel_topic": ["channel_id", "topic"],
+    "edit_guild": ["guild_id"],
 }
 
 
@@ -850,7 +899,15 @@ def _build_schema(
         },
         "name": {
             "type": "string",
-            "description": "New thread name (create_thread).",
+            "description": "Name string — thread name (create_thread), new channel name (rename_channel), or new guild name (edit_guild).",
+        },
+        "topic": {
+            "type": "string",
+            "description": "Channel topic / description shown under the channel name (set_channel_topic).",
+        },
+        "description": {
+            "type": "string",
+            "description": "Guild description / about-text (edit_guild).",
         },
         "limit": {
             "type": "integer",

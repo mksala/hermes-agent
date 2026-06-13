@@ -1,0 +1,14 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Cloudflared finish script. Companion to ./run — same pattern as
+# ../dashboard/finish.
+#
+# When TUNNEL_TOKEN is unset, ./run exits 0 immediately; exit 125 here
+# tells s6-supervise "permanently failed, do not restart" so the slot
+# reports down, matching reality. When TUNNEL_TOKEN IS set and
+# cloudflared exits or crashes, exit 0 so s6-supervise restarts it.
+
+if [ -n "${TUNNEL_TOKEN:-}" ]; then
+    exit 0
+fi
+exit 125
