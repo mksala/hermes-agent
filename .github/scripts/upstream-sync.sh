@@ -1,38 +1,41 @@
 #!/usr/bin/env bash
-# Sync the fork's `main` with NousResearch/hermes-agent and report whether the
-# local Railway patches on `railway` still rebase cleanly. Notify via a GitHub
-# issue. Never deploys and never mutates `railway` on the fork — the deploy
-# stays a deliberate, human-triggered step. Run by .github/workflows/upstream-sync.yml.
+# Track NousResearch/hermes-agent and report whether the local Railway patches
+# on `railway` still rebase cleanly onto the latest upstream main. Notify via a
+# GitHub issue. Never deploys and never mutates `railway`/`main` on the fork.
+#
+# Note: CI deliberately does NOT push the `main` mirror. GitHub blocks the
+# default GITHUB_TOKEN from pushing changes under .github/workflows/, which
+# every upstream sync touches. The `main` mirror is instead refreshed during
+# the manual update (the local mksala token has `workflow` scope). The rebase
+# here is probed directly against upstream/main, so the mirror isn't needed.
+#
+# Run by .github/workflows/upstream-sync.yml. In CI: origin = the fork,
+# upstream = NousResearch (added below).
 set -euo pipefail
 
 UPSTREAM_URL="https://github.com/NousResearch/hermes-agent.git"
 LABEL="upstream-sync"
 
-# Commit identity must stay 10102-safe (no real name / personal email).
 git config user.name "mk"
 git config user.email "mk@10102.io"
 
 git remote add upstream "$UPSTREAM_URL" 2>/dev/null || git remote set-url upstream "$UPSTREAM_URL"
 git fetch --no-tags --quiet upstream main
-git fetch --no-tags --quiet origin main
 
 upstream_sha="$(git rev-parse upstream/main)"
-fork_sha="$(git rev-parse origin/main)"
+base="$(git merge-base railway upstream/main)"
 
-if [ "$upstream_sha" = "$fork_sha" ]; then
-  echo "Fork main is already at upstream ($upstream_sha). Nothing to do."
+if [ "$base" = "$upstream_sha" ]; then
+  echo "railway already contains every upstream commit ($upstream_sha). Nothing to do."
   exit 0
 fi
 
-behind="$(git rev-list --count "${fork_sha}..${upstream_sha}")"
+behind="$(git rev-list --count "${base}..${upstream_sha}")"
 short="${upstream_sha:0:7}"
-echo "Upstream is ${behind} commit(s) ahead -> ${short}. Fast-forwarding fork main."
-
-# `main` is a pure mirror of upstream — fast-forward it (no merge commit).
-git push origin "refs/remotes/upstream/main:refs/heads/main"
+echo "railway is behind upstream by ${behind} commit(s); upstream main at ${short}."
 
 # Probe (in a throwaway branch) whether the railway patches still apply on the
-# new main. The fork's `railway` branch is left untouched.
+# latest upstream main. The fork's `railway` branch is left untouched.
 git checkout -B _rebase_probe railway >/dev/null 2>&1
 if git rebase upstream/main >/dev/null 2>&1; then
   result="clean"
@@ -49,36 +52,36 @@ echo "Rebase probe: ${result}${conflicts:+ (conflicts: ${conflicts})}"
 body_file="$(mktemp)"
 if [ "$result" = "clean" ]; then
 cat > "$body_file" <<EOF
-Upstream **NousResearch/hermes-agent** advanced by **${behind}** commit(s) to \`${short}\`.
+Upstream **NousResearch/hermes-agent** is **${behind}** commit(s) ahead of the railway patches (upstream main at \`${short}\`).
 
-The fork's \`main\` was fast-forwarded. A test rebase of \`railway\` onto the new \`main\` applied **cleanly** :white_check_mark:.
+A test rebase of \`railway\` onto the latest upstream main applied **cleanly** :white_check_mark:.
 
-**To ship the update:**
+**To ship the update** (locally; \`origin\` = upstream, \`fork\` = 10102-labs/hermes):
 \`\`\`sh
 cd ~/DevMac/hermes
-git fetch fork
-git checkout main && git reset --hard fork/main
-git checkout railway && git rebase main && git push -f fork railway
+git fetch origin
+git checkout railway && git rebase origin/main && git push -f fork railway
+git branch -f main origin/main && git push fork main   # refresh the mirror
 railway up --service hermes-agent --detach
 \`\`\`
 \`HERMES_DASHBOARD_INSECURE=1\` must remain set on the Railway service.
 EOF
 else
 cat > "$body_file" <<EOF
-Upstream **NousResearch/hermes-agent** advanced by **${behind}** commit(s) to \`${short}\`.
+Upstream **NousResearch/hermes-agent** is **${behind}** commit(s) ahead of the railway patches (upstream main at \`${short}\`).
 
-The fork's \`main\` was fast-forwarded, but the \`railway\` rebase **conflicts** :warning: and needs manual resolution.
+A test rebase of \`railway\` onto the latest upstream main **conflicts** :warning: and needs manual resolution.
 
 Conflicting files: \`${conflicts}\`
 
-**Resolve locally:**
+**Resolve locally** (\`origin\` = upstream, \`fork\` = 10102-labs/hermes):
 \`\`\`sh
 cd ~/DevMac/hermes
-git fetch fork
-git checkout main && git reset --hard fork/main
-git checkout railway && git rebase main
+git fetch origin
+git checkout railway && git rebase origin/main
 # fix the conflicts, then:
 git rebase --continue && git push -f fork railway
+git branch -f main origin/main && git push fork main   # refresh the mirror
 railway up --service hermes-agent --detach
 \`\`\`
 EOF
