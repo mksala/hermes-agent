@@ -87,12 +87,16 @@ railway up --service hermes-agent --detach
 EOF
 fi
 
-gh label create "$LABEL" --color FBCA04 --description "Upstream hermes-agent has new commits" >/dev/null 2>&1 || true
-existing="$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')"
+# Dedup by exact title (label-independent: gh-in-CI can't reliably resolve
+# --label, so we don't depend on it for either lookup or creation).
+export TITLE="Upstream sync: hermes-agent has new commits"
+existing="$(gh issue list --state open --limit 100 --json number,title --jq '.[] | select(.title==env.TITLE) | .number' | head -1)"
 if [ -n "$existing" ]; then
   echo "Commenting on existing issue #${existing}."
   gh issue comment "$existing" --body-file "$body_file"
 else
   echo "Opening a new tracking issue."
-  gh issue create --title "Upstream sync: hermes-agent has new commits" --label "$LABEL" --body-file "$body_file"
+  # Try with the label; fall back to no label so a label hiccup never fails the run.
+  gh issue create --title "$TITLE" --label "$LABEL" --body-file "$body_file" 2>/dev/null \
+    || gh issue create --title "$TITLE" --body-file "$body_file"
 fi
