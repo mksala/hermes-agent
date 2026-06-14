@@ -87,16 +87,19 @@ railway up --service hermes-agent --detach
 EOF
 fi
 
-# Dedup by exact title (label-independent: gh-in-CI can't reliably resolve
-# --label, so we don't depend on it for either lookup or creation).
+# Use the REST API (gh api), not gh issue create/list: the latter go through
+# GraphQL, which fine-grained PATs routinely get "Resource not accessible" on
+# even with Issues:write. REST works with the same scope.
+# Dedup by exact title (REST issues list includes PRs, so filter those out).
+repo="${GITHUB_REPOSITORY:-10102-labs/hermes}"
 export TITLE="Upstream sync: hermes-agent has new commits"
-existing="$(gh issue list --state open --limit 100 --json number,title --jq '.[] | select(.title==env.TITLE) | .number' | head -1)"
+body="$(cat "$body_file")"
+existing="$(gh api "repos/${repo}/issues?state=open&per_page=100" \
+  --jq '.[] | select(has("pull_request")|not) | select(.title==env.TITLE) | .number' | head -1)"
 if [ -n "$existing" ]; then
   echo "Commenting on existing issue #${existing}."
-  gh issue comment "$existing" --body-file "$body_file"
+  gh api -X POST "repos/${repo}/issues/${existing}/comments" -f body="$body" >/dev/null
 else
   echo "Opening a new tracking issue."
-  # Try with the label; fall back to no label so a label hiccup never fails the run.
-  gh issue create --title "$TITLE" --label "$LABEL" --body-file "$body_file" 2>/dev/null \
-    || gh issue create --title "$TITLE" --body-file "$body_file"
+  gh api -X POST "repos/${repo}/issues" -f title="$TITLE" -f body="$body" >/dev/null
 fi
