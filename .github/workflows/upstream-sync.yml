@@ -1,0 +1,34 @@
+name: upstream-sync
+
+# Tracks NousResearch/hermes-agent and keeps the fork's `main` mirror current.
+# Probes whether the Railway patches on `railway` still rebase cleanly and opens
+# a tracking issue with ship instructions. It never deploys — deploying stays a
+# deliberate `railway up` step (see the issue body).
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # daily, 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout railway (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: railway
+          fetch-depth: 0
+
+      - name: Sync from upstream and report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/upstream-sync.sh
