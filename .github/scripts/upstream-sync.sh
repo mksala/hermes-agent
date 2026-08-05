@@ -56,12 +56,12 @@ Upstream **NousResearch/hermes-agent** is **${behind}** commit(s) ahead of the r
 
 A test rebase of \`railway\` onto the latest upstream main applied **cleanly** :white_check_mark:.
 
-**To ship the update** (locally; \`origin\` = upstream, \`fork\` = 10102-labs/hermes):
+**To ship the update** (locally; \`origin\` = upstream, \`fork\` = mksala/hermes-agent):
 \`\`\`sh
 cd ~/DevMac/hermes
 git fetch origin
-git checkout railway && git rebase origin/main && git push -f fork railway
-git branch -f main origin/main && git push fork main   # refresh the mirror
+git checkout railway && git rebase origin/main && git push -f ghfork railway
+git branch -f main origin/main && git push ghfork main   # refresh the mirror
 railway up --service hermes-agent --detach
 \`\`\`
 \`HERMES_DASHBOARD_INSECURE=1\` must remain set on the Railway service.
@@ -74,14 +74,14 @@ A test rebase of \`railway\` onto the latest upstream main **conflicts** :warnin
 
 Conflicting files: \`${conflicts}\`
 
-**Resolve locally** (\`origin\` = upstream, \`fork\` = 10102-labs/hermes):
+**Resolve locally** (\`origin\` = upstream, \`fork\` = mksala/hermes-agent):
 \`\`\`sh
 cd ~/DevMac/hermes
 git fetch origin
 git checkout railway && git rebase origin/main
 # fix the conflicts, then:
-git rebase --continue && git push -f fork railway
-git branch -f main origin/main && git push fork main   # refresh the mirror
+git rebase --continue && git push -f ghfork railway
+git branch -f main origin/main && git push ghfork main   # refresh the mirror
 railway up --service hermes-agent --detach
 \`\`\`
 EOF
@@ -91,7 +91,7 @@ fi
 # GraphQL, which fine-grained PATs routinely get "Resource not accessible" on
 # even with Issues:write. REST works with the same scope.
 # Dedup by exact title (REST issues list includes PRs, so filter those out).
-repo="${GITHUB_REPOSITORY:-10102-labs/hermes}"
+repo="${GITHUB_REPOSITORY:-mksala/hermes-agent}"
 export TITLE="Upstream sync: hermes-agent has new commits"
 body="$(cat "$body_file")"
 existing="$(gh api "repos/${repo}/issues?state=open&per_page=100" \

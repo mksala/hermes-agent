@@ -30,8 +30,8 @@ jobs:
 
       - name: Sync from upstream and report
         env:
-          # Fine-grained PAT (Issues: read/write on this repo only). The built-in
-          # GITHUB_TOKEN is capped read-only by the account-level Actions default,
-          # which has no API/repo override, so issue creation needs this PAT.
-          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          # Prefers a SYNC_TOKEN fine-grained PAT if configured; falls back to the
+          # built-in token, which works if this account allows Actions issue writes.
+          # If issue creation 403s, add a SYNC_TOKEN secret (Issues: RW, this repo).
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
         run: bash .github/scripts/upstream-sync.sh
