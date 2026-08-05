@@ -1,0 +1,16 @@
+# Railway-only: trim the `railway up` upload to what the Docker build context
+# actually uses. Mirrors upstream .dockerignore — these paths are excluded
+# from the image build anyway, so uploading them is pure waste (~85MB) and
+# was causing `railway up` upload timeouts on slow uplinks.
+.git/
+tests/
+website/
+apps/desktop/
+apps/bootstrap-installer/
+data/
+.hermes-docker/
+.notebooklm-home/
+hermes-config/
+runtime/
+.pytest_cache/
+node_modules/
