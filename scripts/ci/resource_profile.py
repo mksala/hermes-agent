@@ -17,6 +17,8 @@ Output JSON shape:
     {
         "label": "tests slice 1/8",
         "duration_s": 42.3,
+        "started_at": "2026-01-01T00:01:00Z",   # UTC bounds of the sample
+        "completed_at": "2026-01-01T00:01:42Z", # window, for report placement
         "cpu": {
             "avg_usage_pct": 55.2,
             "peak_usage_pct": 89.1,
@@ -62,6 +64,7 @@ import re
 import signal
 import sys
 import time
+from datetime import datetime, timezone
 
 _SAMPLE_INTERVAL_S = 1.0
 _CLK_TICK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
@@ -238,6 +241,14 @@ def run_profiler(output_path: str, label: str, timeout_s: float = 0) -> None:
 
     cpu_prev: dict | None = None
     start = time.monotonic()
+    # Wall-clock anchor for the sample window. The report needs to know WHEN
+    # these samples happened, not just how long they lasted: the profiler
+    # wraps one step, so on a job whose other steps (checkout, setup, post)
+    # dominate, the profiled window is a slice in the middle of the bar.
+    # Without this the overlay gets stretched across the whole job and the
+    # x-axis lies. monotonic() drives the sampling (immune to clock steps);
+    # this is only for placement.
+    started_at = datetime.now(timezone.utc)
     last_sample = start
     running = [True]  # mutable for signal handler
 
@@ -300,6 +311,13 @@ def run_profiler(output_path: str, label: str, timeout_s: float = 0) -> None:
     summary = {
         "label": label,
         "duration_s": round(duration_s, 1),
+        # ISO-8601 UTC bounds of the sample window, in the same format as
+        # GitHub's job/step timestamps so the report can place the series
+        # against a job bar's x-axis instead of stretching it to fill.
+        "started_at": started_at.isoformat().replace("+00:00", "Z"),
+        "completed_at": (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        ),
         "cpu": {
             "avg_usage_pct": round(sum(cpu_samples) / n, 1),
             "peak_usage_pct": round(max(cpu_samples, default=0.0), 1),

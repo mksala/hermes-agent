@@ -5,9 +5,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 _PATH = Path(__file__).resolve().parents[2] / "scripts" / "ci" / "timings_report.py"
 _spec = importlib.util.spec_from_file_location("timings_report", _PATH)
@@ -401,3 +404,79 @@ def test_gantt_overlay_survives_profiles_without_series():
     html = _mod.generate_html(t, None, {"tests-slice-1": _profile("tests-slice-1")})
     assert 'class="res-overlay' not in html
     assert "Resource Usage" in html
+
+
+# ── overlay placement: profiled window, not the whole job ───────────────
+#
+# The profiler wraps ONE step, so on a job dominated by checkout/setup/post
+# the samples cover a slice in the middle of the bar. Stretching them to the
+# full bar puts a CPU spike under a step that never ran.
+
+_FULL_BAR = (0.0, 1.0)
+
+
+def _window(profile, job_start_s=0.0, job_dur_s=100.0):
+    """(start, width) of the overlay as fractions of the job bar."""
+    return _mod._profile_window_frac(
+        profile,
+        _mod.parse_ts(_ts(job_start_s)),
+        _mod.parse_ts(_ts(job_start_s + job_dur_s)),
+    )
+
+
+def _profiled(start_s: float | None = None, end_s: float = 0.0):
+    p = _with_series("tests", [1, 2], [3, 4], [5, 6])
+    if start_s is not None:
+        p["started_at"], p["completed_at"] = _ts(start_s), _ts(end_s)
+    return p
+
+
+def test_overlay_spans_only_the_profiled_slice_of_the_job():
+    """A 30s profile inside a 100s job covers 60%..90%, not the whole bar."""
+    assert _window(_profiled(60, 90)) == pytest.approx((0.6, 0.3))
+
+
+def test_overlay_placement_is_relative_to_the_jobs_own_start():
+    """Offsets are measured from the job's start, not the run's."""
+    assert _window(_profiled(250, 275), job_start_s=200.0) == pytest.approx((0.5, 0.25))
+
+
+def test_overlay_falls_back_to_full_bar_without_timestamps():
+    """Profiles predating started_at/completed_at keep the old behaviour."""
+    p = _profiled()
+    assert "started_at" not in p
+    assert _window(p) == _FULL_BAR
+
+
+def test_overlay_falls_back_when_window_misses_the_job():
+    """Clock skew that puts the window outside the job must not vanish it."""
+    assert _window(_profiled(9000, 9030)) == _FULL_BAR
+
+
+def test_overlay_clamps_a_profiler_that_outran_the_job():
+    """A profile ending after the job's completed_at is clipped to the bar."""
+    start, width = _window(_profiled(60, 150))
+    assert (start, start + width) == pytest.approx((0.6, 1.0))
+
+
+def test_overlay_keeps_a_hairline_for_a_very_short_profile():
+    """A sub-percent window stays visible rather than collapsing to nothing."""
+    assert _window(_profiled(50, 50.01))[1] >= 0.005
+
+
+def test_gantt_positions_both_overlay_states_over_the_same_window():
+    """The in-bar strip and the expanded layer must agree on the x-axis."""
+    t = _timings([_job("Python tests / Run tests slice 1/8", 100.0)])
+    p = _profiled(60, 90)
+    p["label"] = "tests-slice-1"
+
+    html = _mod.generate_html(t, None, {"tests-slice-1": p})
+
+    geom = {
+        kind: (round(float(l)), round(float(w)))
+        for kind, l, w in re.findall(
+            r'res-(holder|clip)[^>]*style="left:([\d.]+)%;width:([\d.]+)%"', html
+        )
+    }
+    # The job spans the whole run here, so bar- and track-relative agree.
+    assert geom == {"holder": (60, 30), "clip": (60, 30)}, html[:400]

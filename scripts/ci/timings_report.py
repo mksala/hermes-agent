@@ -715,6 +715,47 @@ def _resource_overlay(profile: dict | None, expanded: bool) -> str:
     return f'<div class="{klass}" title="{escape(tip)}">{"".join(layers)}</div>'
 
 
+def _profile_window_frac(profile: dict | None, job_start, job_end) -> tuple[float, float]:
+    """Return (start, width) of the profiled window as fractions of the job bar.
+
+    ``(0.0, 1.0)`` means "the whole bar" and is the fallback for every case
+    we cannot place confidently — that is exactly the old behaviour, so a
+    miss degrades to stretching rather than to a missing overlay.
+
+    Fractions rather than percentages because the two overlay states live in
+    different coordinate spaces: the collapsed strip is a child of the bar,
+    the expanded layer sits in the track. Each scales this once, instead of
+    one of them undoing the other's scaling.
+
+    Placement matters because the profiler wraps ONE step
+    (``.github/actions/profile``): on a job whose other steps dominate —
+    checkout, uv sync, post-job cleanup — the samples describe a slice in
+    the middle, and stretching them across the bar puts a CPU spike under a
+    step that never ran.
+    """
+    if not profile or job_start is None or job_end is None:
+        return 0.0, 1.0
+
+    p_s = parse_ts(profile.get("started_at"))
+    p_e = parse_ts(profile.get("completed_at"))
+    if p_s is None or p_e is None:
+        return 0.0, 1.0  # artifact predates the timestamps
+
+    span = (job_end - job_start).total_seconds()
+    if span <= 0:
+        return 0.0, 1.0
+
+    # Clamped into the bar: a profiler signalled just after its step ends can
+    # outrun the job's completed_at by a second or two.
+    start = max(0.0, (p_s - job_start).total_seconds() / span)
+    end = min(1.0, (p_e - job_start).total_seconds() / span)
+    if end <= start:
+        return 0.0, 1.0  # clock skew put the window outside the job
+
+    # Floor keeps a hairline visible for a very short profile on a long job.
+    return start, max(end - start, 0.005)
+
+
 def classify_bottleneck(timings: dict, profiles: dict[str, dict]) -> str:
     """Return a one-line bottleneck classification.
 
@@ -936,6 +977,11 @@ h2 { font-size: 18px; margin: 32px 0 12px; }
 .res-overlay { position: absolute; left: 0; width: 100%; pointer-events: none; }
 .res-overlay.collapsed { bottom: 0; height: 3px; }
 .res-overlay.expanded { top: 0; height: 100%; }
+/* Positions the collapsed strip over the profiled window within the bar.
+   The strip itself is 100%-wide of THIS box, not of the job bar, so a job
+   whose profiled step is a slice in the middle shows the sparkline only
+   under that slice. */
+.res-clip { position: absolute; bottom: 0; height: 3px; pointer-events: none; }
 .res-spark { position: absolute; inset: 0; width: 100%; height: 100%; }
 /* Area fills so all three read stacked; the stroke on top is what actually
    makes each curve legible. At 3px the fill needs near-full opacity to
@@ -1155,12 +1201,22 @@ def _gantt_bars(timings: dict, baseline: dict | None,
 
         seg_html = "".join(segments)
 
-        # Resource overlay. The collapsed strip is a child of the job bar
-        # (clipped to it, adds no row height); the expanded layer is its own
-        # absolutely-positioned track, sized to the bar so the x-axes agree.
-        # See the .res-overlay CSS for how the two states are drawn.
+        # Resource overlay, drawn over the PROFILED WINDOW rather than the
+        # whole job — see _profile_window_frac. The collapsed strip is a
+        # child of the bar (clipped to it, adds no row height) so it scales
+        # the fraction against the bar; the expanded layer is its own track
+        # row, so it scales against the track.
         profile = job_profiles.get(j["name"])
+        f_left, f_width = _profile_window_frac(profile, s, e)
+
         collapsed_overlay = _resource_overlay(profile, expanded=False)
+        if collapsed_overlay:
+            collapsed_overlay = (
+                f'<div class="res-clip" '
+                f'style="left:{f_left * 100:.2f}%;width:{f_width * 100:.2f}%">'
+                f'{collapsed_overlay}</div>'
+            )
+
         expanded_overlay = ""
         inner = _resource_overlay(profile, expanded=True)
         if inner:
@@ -1169,7 +1225,8 @@ def _gantt_bars(timings: dict, baseline: dict | None,
                 f'<div class="gantt-label"></div>'
                 f'<div class="gantt-track">'
                 f'<div class="res-holder" '
-                f'style="left:{left:.2f}%;width:{width:.2f}%">{inner}</div>'
+                f'style="left:{left + f_left * width:.2f}%;'
+                f'width:{f_width * width:.2f}%">{inner}</div>'
                 f'</div></div>'
             )
 
