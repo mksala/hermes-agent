@@ -14,3 +14,4 @@ hermes-config/
 runtime/
 .pytest_cache/
 node_modules/
+# (2026-08-19: no-op line to verify Railway push-to-deploy webhook)
