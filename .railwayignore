@@ -16,3 +16,4 @@ runtime/
 node_modules/
 # (2026-08-19: no-op line to verify Railway push-to-deploy webhook)
 # (2026-08-19: second webhook verification after disabling inherited CI)
+# (2026-08-19: webhook verification after transfer to 10102-io)
